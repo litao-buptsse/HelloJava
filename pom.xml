@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.litao</groupId>
+    <artifactId>helloworld</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>1.7</source>
+                    <target>1.7</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencies>
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.9</version>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>sogou.repo</id>
+            <url>http://cloud.sogou-inc.com/nexus/content/groups/public</url>
+            <name>Sogou Repository</name>
+        </repository>
+    </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>sogou.repo</id>
+            <url>http://cloud.sogou-inc.com/nexus/content/groups/public</url>
+            <name>Sogou Repository</name>
+        </pluginRepository>
+    </pluginRepositories>
+
+    <distributionManagement>
+        <repository>
+            <id>sogou.cloud.releases</id>
+            <name>Sogou Release Distribution Repository</name>
+            <url>http://cloud.sogou-inc.com/nexus/content/repositories/Release</url>
+        </repository>
+        <snapshotRepository>
+            <id>sogou.cloud.snapshots</id>
+            <name>Sogou Snapshot Repository</name>
+            <url>http://cloud.sogou-inc.com/nexus/content/repositories/snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
+</project>
