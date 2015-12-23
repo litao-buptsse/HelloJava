@@ -56,9 +56,7 @@ public class NIOTCPServer {
             channel = serverChannel.accept();
             System.out.println(String.format("accept new connection: %s", channel.getRemoteAddress()));
             channel.configureBlocking(false);
-            SelectionKey key2 = channel.register(selector, SelectionKey.OP_READ);
-            ByteBuffer buffer = ByteBuffer.allocate(10);
-            key2.attach(buffer);
+            channel.register(selector, SelectionKey.OP_READ, ByteBuffer.allocate(10));
           } catch (IOException e) {
             e.printStackTrace();
             closeQuietly(channel);
