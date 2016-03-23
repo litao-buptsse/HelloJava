@@ -1,12 +1,11 @@
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 /**
  * Created by Tao Li on 2016/3/23.
@@ -16,20 +15,20 @@ public class WebPageRender {
 
   private int downloadPicture(int id) {
     LOG.info("begin download picture " + id);
-    sleepQuietly(5);
+    CommonUtils.sleepQuietly(5);
     LOG.info("end download picture " + id);
     return id;
   }
 
   private void renderText() {
     LOG.info("begin render text");
-    sleepQuietly(1);
+    CommonUtils.sleepQuietly(1);
     LOG.info("end render text");
   }
 
   private void renderPicture(int newId) {
     LOG.info("begin render picture " + newId);
-    sleepQuietly(1);
+    CommonUtils.sleepQuietly(1);
     LOG.info("end render picture " + newId);
   }
 
@@ -60,7 +59,7 @@ public class WebPageRender {
       });
     }
 
-    waitForExecutorServiceShutdown(service, 60);
+    CommonUtils.waitForExecutorServiceShutdown(service, 60);
   }
 
   public void render2(int[] pictureIds) {
@@ -83,7 +82,7 @@ public class WebPageRender {
         })
     );
 
-    waitForExecutorServiceShutdown(service, 60);
+    CommonUtils.waitForExecutorServiceShutdown(service, 60);
   }
 
   public void render3(int[] pictureIds) {
@@ -96,49 +95,87 @@ public class WebPageRender {
     );
     renderText();
 
-    waitForExecutorServiceShutdown(service, 60);
+    CommonUtils.waitForExecutorServiceShutdown(service, 60);
   }
 
-  private static void sleepQuietly(long seconds) {
+  public static void main(String[] args) {
+    WebPageRender render = new WebPageRender();
+    int[] pictureIds = IntStream.iterate(1, n -> n + 1).limit(5).toArray();
+    long timeout = 10;
+
+    TestUtils.test(timeout, true,
+        new TestUtils.TestCase<>("render1", render::render1, pictureIds),
+        new TestUtils.TestCase<>("render2", render::render2, pictureIds),
+        new TestUtils.TestCase<>("render3", render::render3, pictureIds)
+    );
+  }
+}
+
+class TestUtils {
+  public static class TestCase<T> {
+    private String name;
+    private Consumer<T> consumer;
+    private T t;
+
+    public TestCase(String name, Consumer<T> consumer, T t) {
+      this.name = name;
+      this.consumer = consumer;
+      this.t = t;
+    }
+  }
+
+  public static <T> long test(Consumer<T> consumer, T t) {
+    long beginTime = System.nanoTime();
+    consumer.accept(t);
+    long endTime = System.nanoTime();
+    return TimeUnit.NANOSECONDS.toMillis(endTime - beginTime);
+  }
+
+  private static <T> CompletableFuture<Void> testFure(ExecutorService service,
+                                                      String name, Consumer<T> consumer, T t) {
+    return CompletableFuture.supplyAsync(() -> test(consumer, t), service)
+        .thenAccept(time -> System.out.println(String.format("%s took: %d ms", name, time)));
+  }
+
+  public static <T> void test(long timeout, boolean parallel, TestCase<T>... testCases) {
+    ExecutorService service = Executors.newFixedThreadPool(testCases.length);
+
+    Stream<CompletableFuture<Void>> stream = Stream.of(testCases)
+        .map(testCase -> testFure(service, testCase.name, testCase.consumer, testCase.t));
+
+    if (parallel) {
+      stream = stream.parallel();
+    }
+
+    stream.forEach(future -> {
+      try {
+        future.get(timeout, TimeUnit.SECONDS);
+      } catch (TimeoutException e) {
+        System.err.println(String.format("exceed timeout %s s", timeout));
+        future.cancel(true);
+      } catch (ExecutionException | InterruptedException e) {
+        e.printStackTrace();
+        future.cancel(true);
+      }
+    });
+
+    CommonUtils.waitForExecutorServiceShutdown(service, 5 + timeout * testCases.length);
+  }
+}
+
+class CommonUtils {
+  public static void sleepQuietly(long seconds) {
     try {
       TimeUnit.SECONDS.sleep(seconds);
     } catch (InterruptedException e) {
     }
   }
 
-  private static void waitForExecutorServiceShutdown(ExecutorService service, long seconds) {
+  public static void waitForExecutorServiceShutdown(ExecutorService service, long seconds) {
     service.shutdown();
     try {
       service.awaitTermination(seconds, TimeUnit.SECONDS);
     } catch (InterruptedException e) {
     }
-  }
-
-  public static long test(Consumer<int[]> consumer, int[] pictureIds) {
-    long beginTime = System.nanoTime();
-    consumer.accept(pictureIds);
-    long endTime = System.nanoTime();
-    return TimeUnit.NANOSECONDS.toMillis(endTime - beginTime);
-  }
-
-  public static void main(String[] args) {
-    int[] pictureIds = IntStream.iterate(1, n -> n + 1).limit(5).toArray();
-
-    ExecutorService service = Executors.newFixedThreadPool(3);
-
-    Map<String, Future<Long>> testCases = new HashMap<>();
-    testCases.put("render1", service.submit(() -> test(new WebPageRender()::render1, pictureIds)));
-    testCases.put("render2", service.submit(() -> test(new WebPageRender()::render2, pictureIds)));
-    testCases.put("render3", service.submit(() -> test(new WebPageRender()::render3, pictureIds)));
-
-    testCases.forEach((name, future) -> {
-      try {
-        System.out.println(String.format("%s took: %d ms", name, future.get()));
-      } catch (Exception e) {
-        System.out.println(String.format("fail to execute: %s", name));
-      }
-    });
-
-    waitForExecutorServiceShutdown(service, 60);
   }
 }
