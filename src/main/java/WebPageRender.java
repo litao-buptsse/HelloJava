@@ -1,3 +1,5 @@
+import com.sun.xml.internal.ws.util.CompletedFuture;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -35,9 +37,9 @@ public class WebPageRender {
   public void render1(int[] pictureIds) {
     ExecutorService service = Executors.newFixedThreadPool(5);
 
-    List<Future<Integer>> futures = new ArrayList<>();
+    List<Future<Integer>> downloadPictureFutures = new ArrayList<>();
     for (int id : pictureIds) {
-      futures.add(service.submit(new Callable<Integer>() {
+      downloadPictureFutures.add(service.submit(new Callable<Integer>() {
         @Override
         public Integer call() throws Exception {
           return downloadPicture(id);
@@ -47,63 +49,65 @@ public class WebPageRender {
 
     renderText();
 
-    for (Future<Integer> future : futures) {
-      service.submit(new Runnable() {
+    List<Future<?>> renderPictureFutures = new ArrayList<>();
+    for (Future<Integer> future : downloadPictureFutures) {
+      renderPictureFutures.add(service.submit(new Runnable() {
         @Override
         public void run() {
-          try {
-            renderPicture(future.get());
-          } catch (Exception e) {
-          }
+          renderPicture(CommonUtils.getFutureQuietly(future));
         }
-      });
+      }));
     }
 
-    CommonUtils.waitForExecutorServiceShutdown(service, 60);
+    for (Future<?> future : renderPictureFutures) {
+      CommonUtils.getFutureQuietly(future);
+    }
+
+    service.shutdown();
   }
 
   public void render2(int[] pictureIds) {
     ExecutorService service = Executors.newFixedThreadPool(5);
 
     // download pictures
-    List<Future<Integer>> futures = IntStream.of(pictureIds)
+    List<Future<Integer>> downloadPictureFutures = IntStream.of(pictureIds)
         .mapToObj(id -> service.submit(() -> downloadPicture(id))).collect(Collectors.toList());
 
     // render text
     renderText();
 
     // render pictures
-    futures.stream().forEach(future ->
-        service.submit(() -> {
-          try {
-            renderPicture(future.get());
-          } catch (Exception e) {
-          }
-        })
-    );
+    List<Future<?>> renderPictureFutures = downloadPictureFutures.stream().map(future ->
+        service.submit(() -> renderPicture(CommonUtils.getFutureQuietly(future)))
+    ).collect(Collectors.toList());
 
-    CommonUtils.waitForExecutorServiceShutdown(service, 60);
+    // wait for complete
+    renderPictureFutures.stream().forEach(CommonUtils::getFutureQuietly);
+
+    service.shutdown();
   }
 
   public void render3(int[] pictureIds) {
     ExecutorService service = Executors.newFixedThreadPool(5);
 
-    IntStream.of(pictureIds).forEach(id ->
-        CompletableFuture
-            .supplyAsync(() -> downloadPicture(id), service)
-            .thenAccept(picId -> renderPicture(picId))
+    CompletableFuture<Void> future = CompletableFuture.allOf(
+        IntStream.of(pictureIds).mapToObj(id ->
+            CompletableFuture
+                .supplyAsync(() -> downloadPicture(id), service)
+                .thenAccept(picId -> renderPicture(picId))
+        ).toArray(CompletableFuture[]::new)
     );
     renderText();
+    future.join();
 
-    CommonUtils.waitForExecutorServiceShutdown(service, 60);
+    service.shutdown();
   }
 
   public static void main(String[] args) {
     WebPageRender render = new WebPageRender();
     int[] pictureIds = IntStream.iterate(1, n -> n + 1).limit(5).toArray();
-    long timeout = 10;
 
-    TestUtils.test(timeout, true,
+    TestUtils.test(
         new TestUtils.TestCase<>("render1", render::render1, pictureIds),
         new TestUtils.TestCase<>("render2", render::render2, pictureIds),
         new TestUtils.TestCase<>("render3", render::render3, pictureIds)
@@ -137,29 +141,16 @@ class TestUtils {
         .thenAccept(time -> System.out.println(String.format("%s took: %d ms", name, time)));
   }
 
-  public static <T> void test(long timeout, boolean parallel, TestCase<T>... testCases) {
+  public static <T> void test(TestCase<T>... testCases) {
     ExecutorService service = Executors.newFixedThreadPool(testCases.length);
 
-    Stream<CompletableFuture<Void>> stream = Stream.of(testCases)
-        .map(testCase -> testFure(service, testCase.name, testCase.consumer, testCase.t));
+    CompletableFuture.allOf(
+        Stream.of(testCases)
+            .map(testCase -> testFure(service, testCase.name, testCase.consumer, testCase.t))
+            .toArray(CompletableFuture[]::new)
+    ).join();
 
-    if (parallel) {
-      stream = stream.parallel();
-    }
-
-    stream.forEach(future -> {
-      try {
-        future.get(timeout, TimeUnit.SECONDS);
-      } catch (TimeoutException e) {
-        System.err.println(String.format("exceed timeout %s s", timeout));
-        future.cancel(true);
-      } catch (ExecutionException | InterruptedException e) {
-        e.printStackTrace();
-        future.cancel(true);
-      }
-    });
-
-    CommonUtils.waitForExecutorServiceShutdown(service, 5 + timeout * testCases.length);
+    service.shutdown();
   }
 }
 
@@ -171,11 +162,11 @@ class CommonUtils {
     }
   }
 
-  public static void waitForExecutorServiceShutdown(ExecutorService service, long seconds) {
-    service.shutdown();
+  public static <T> T getFutureQuietly(Future<T> future) {
     try {
-      service.awaitTermination(seconds, TimeUnit.SECONDS);
-    } catch (InterruptedException e) {
+      return future.get();
+    } catch (InterruptedException | ExecutionException e) {
+      return null;
     }
   }
 }
